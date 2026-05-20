@@ -684,6 +684,40 @@ class OrderExecutor:
                 error_message=str(e),
             )
 
+    def get_open_stop_order(self, symbol: str) -> Optional[dict]:
+        """Return the open protective stop for ``symbol`` as a dict, or None.
+
+        Finds the live stop placed by an OTO/bracket entry by querying the
+        broker (the source of truth, so it survives restarts and external
+        changes). Used by trailing-stop management to locate the order to
+        tighten.
+
+        Returns
+        -------
+        dict or None
+            ``{"order_id": str, "stop_price": float, "side": str}`` for the
+            first open stop / stop-limit order on the symbol, else None.
+        """
+        self._client._ensure_connected()
+        from alpaca.trading.requests import GetOrdersRequest
+        try:
+            req = GetOrdersRequest(status="open", symbols=[symbol], nested=False)
+            orders = self._client.trading_client.get_orders(filter=req)
+        except Exception as e:
+            logger.warning("get_open_stop_order(%s) failed: %s", symbol, e)
+            return None
+
+        for o in orders:
+            otype = o.type.value if hasattr(o.type, "value") else str(o.type)
+            if "stop" in otype and getattr(o, "stop_price", None):
+                side = o.side.value if hasattr(o.side, "value") else str(o.side)
+                return {
+                    "order_id": str(o.id),
+                    "stop_price": float(o.stop_price),
+                    "side": side,
+                }
+        return None
+
     def sweep_stale_orders(self) -> list[OrderResult]:
         """Cancel orders pending longer than cancel_after_seconds."""
         if self._cancel_after_s <= 0:

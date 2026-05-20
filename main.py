@@ -291,6 +291,9 @@ class TradingLoop:
         # Trading-day tracker for daily/weekly risk-window resets (A3); None
         # until the first tick observes a date.
         self._last_trading_date: Optional[pd.Timestamp] = None
+        # Trailing-stop ATR multiple (A2): each bar the broker stop is tightened
+        # toward price -/+ mult*ATR. <= 0 disables trailing.
+        self._trail_atr_mult: float = config.get("execution", {}).get("trail_stop_atr", 2.0)
 
     def run(self) -> None:
         """Run the trading loop until interrupted."""
@@ -341,6 +344,53 @@ class TradingLoop:
             logger.info("New trading day (%s -> %s): resetting daily risk window.",
                         prev.date(), today.date())
             self._risk.reset_daily(equity)
+
+    def _trail_stops(self, all_bars: dict) -> None:
+        """Trail the broker-side protective stop for each open position (A2).
+
+        For each position with a live stop at the broker, compute a candidate
+        stop at ``price -/+ trail_atr_mult * ATR`` and tighten the resting stop
+        toward it. modify_stop() enforces stop-only-tightens; we also gate here
+        to skip a redundant API call when the candidate isn't tighter. No-op
+        when trailing is disabled (trail_stop_atr <= 0).
+        """
+        if self._trail_atr_mult <= 0:
+            return
+        from data.feature_engineering import atr as _atr
+
+        for sym, pos in self._tracker.positions.items():
+            if getattr(pos, "qty", 0) == 0:
+                continue
+            bars = all_bars.get(sym)
+            if bars is None or len(bars) < 20:
+                continue
+            stop_info = self._executor.get_open_stop_order(sym)
+            if not stop_info:
+                continue
+            try:
+                price = float(bars["close"].iloc[-1])
+                atr_val = float(_atr(bars).iloc[-1])
+            except Exception:
+                continue
+            if atr_val <= 0 or pd.isna(atr_val):
+                continue
+
+            cur_stop = stop_info["stop_price"]
+            if pos.side == "long":
+                desired = round(price - self._trail_atr_mult * atr_val, 2)
+                tighter = desired > cur_stop
+                pos_side = "buy"
+            else:
+                desired = round(price + self._trail_atr_mult * atr_val, 2)
+                tighter = desired < cur_stop
+                pos_side = "sell"
+            if not tighter:
+                continue
+
+            res = self._executor.modify_stop(
+                stop_info["order_id"], desired, current_side=pos_side)
+            logger.info("Trailed stop %s: %.2f -> %.2f (%s)",
+                        sym, cur_stop, desired, res.status.value)
 
     def _tick(self) -> None:
         """Execute one iteration of the trading loop."""
@@ -581,6 +631,11 @@ class TradingLoop:
                     )
 
         # --- 11. Update trailing stops for existing positions ---
+        if not self._dry_run:
+            try:
+                self._trail_stops(all_bars)
+            except Exception as e:
+                logger.warning("Trailing-stop update failed: %s", e)
         self._tracker.increment_holding_period()
         self._tracker.update_regime(regime_state.label)
 

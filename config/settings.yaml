@@ -150,6 +150,9 @@ execution:
   cancel_after_seconds: 30
   # If true, chase unfilled limit orders at market price after cancel
   chase_at_market: false
+  # Trailing stop (A2): each bar, tighten the broker stop toward
+  # price -/+ this many ATRs (longs/shorts). 0 disables trailing.
+  trail_stop_atr: 2.0
   # Number of retry attempts for failed orders
   retry_attempts: 1
   retry_delay_seconds: 2
