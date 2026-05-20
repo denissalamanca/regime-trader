@@ -116,7 +116,7 @@ strategy:
 # regime detection. Even if the HMM fails, circuit breakers catch drawdowns.
 #
 # HARDCODED LIMITS (cannot be loosened via config, only tightened):
-#   Max exposure: 80%  |  Max single position: 15%  |  Max leverage: 1.25x
+#   Max exposure: 80%  |  Max single position: 50%  |  Max leverage: 1.25x
 #   Max concurrent positions: 5  |  Max daily trades: 20
 #   Max risk per trade: 1%  |  Min position: $100
 risk:

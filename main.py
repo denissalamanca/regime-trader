@@ -848,6 +848,18 @@ def run_backtest(config: dict, symbols: Optional[list] = None,
     bt = WalkForwardBacktester(config)
     result = bt.run(all_bars, hmm_features)
 
+    # Effective traded span: walk-forward drops the warm-up + first training
+    # window at the start and any trailing partial window at the end, so the
+    # OOS track record is typically shorter than the requested date range.
+    eq = result.equity_curve
+    if len(eq) > 0:
+        logger.info(
+            "Effective OOS traded span: %s -> %s (%d bars). Requested %s -> %s; "
+            "the gap is walk-forward warm-up/first-train + any trailing partial window.",
+            eq.index[0].date(), eq.index[-1].date(), len(eq),
+            bt_config.get("start_date"), bt_config.get("end_date"),
+        )
+
     # Display results
     analyzer = PerformanceAnalyzer(bt_config.get("risk_free_rate", 0.045))
     print(analyzer.format_summary(result.metrics))
@@ -860,7 +872,7 @@ def run_backtest(config: dict, symbols: Optional[list] = None,
         for r in regime_breakdown:
             print(f"  {r.regime_name:<16} trades={r.trade_count:>3}  "
                   f"P&L=${r.pnl_contribution:>10,.2f}  "
-                  f"WR={r.win_rate:.0%}  Sharpe={r.sharpe:.2f}")
+                  f"WR={r.win_rate:.0%}  PnL/σ={r.sharpe:>5.2f}")
 
     # Confidence buckets
     buckets = analyzer.confidence_buckets(result.trades)
@@ -870,7 +882,7 @@ def run_backtest(config: dict, symbols: Optional[list] = None,
         for b in buckets:
             print(f"  {b.bucket_label:<10} trades={b.trade_count:>3}  "
                   f"P&L=${b.total_pnl:>10,.2f}  "
-                  f"WR={b.win_rate:.0%}  Sharpe={b.sharpe:.2f}")
+                  f"WR={b.win_rate:.0%}  PnL/σ={b.sharpe:>5.2f}")
 
     # Benchmark comparison
     if compare and ref_sym in all_bars:
@@ -878,6 +890,13 @@ def run_backtest(config: dict, symbols: Optional[list] = None,
             result.equity_curve, result.trades,
             all_bars[ref_sym], bt_config.get("initial_capital", 100_000))
         print(analyzer.format_comparison(comp))
+
+        # Persist the comparison (previously computed but never written to disk).
+        comp_path = bt_config.get("output", {}).get("comparison_csv")
+        if comp_path:
+            Path(comp_path).parent.mkdir(parents=True, exist_ok=True)
+            analyzer.comparison_to_frame(comp).to_csv(comp_path, index=False)
+            logger.info("Comparison written to %s", comp_path)
 
     # Stress test
     if stress_test:

@@ -297,12 +297,15 @@ class PerformanceAnalyzer:
             winners = group[group["pnl"] > 0]
             wr = len(winners) / n if n > 0 else 0
 
-            # Per-trade returns for Sharpe
+            # Per-trade signal-to-noise: mean trade return / std of trade returns.
+            # NOT an annualized Sharpe — these are per-trade stats on small,
+            # uneven samples, so treat them as a rough quality gauge only. Kept
+            # consistent with confidence_buckets (same formula, no sqrt(252)).
             if n > 1:
                 trade_rets = group["pnl"] / (group["entry_price"] * group["qty"].abs())
-                sr = float(trade_rets.mean() / trade_rets.std() * np.sqrt(252 / max(1, n))) if trade_rets.std() > 0 else 0
+                sr = float(trade_rets.mean() / trade_rets.std()) if trade_rets.std() > 0 else 0.0
             else:
-                sr = 0
+                sr = 0.0
 
             results.append(RegimeMetrics(
                 regime_name=str(regime),
@@ -416,11 +419,13 @@ class PerformanceAnalyzer:
             winners = group[group["pnl"] > 0]
             wr = len(winners) / n
 
+            # Per-trade signal-to-noise (mean/std), consistent with
+            # regime_breakdown. NOT an annualized Sharpe.
             if n > 1:
                 trade_rets = group["pnl"] / (group["entry_price"] * group["qty"].abs())
-                sr = float(trade_rets.mean() / trade_rets.std() * np.sqrt(252)) if trade_rets.std() > 0 else 0
+                sr = float(trade_rets.mean() / trade_rets.std()) if trade_rets.std() > 0 else 0.0
             else:
-                sr = 0
+                sr = 0.0
 
             results.append(ConfidenceBucket(label, lo, hi, n, pnl, wr, sr))
 
@@ -450,9 +455,19 @@ class PerformanceAnalyzer:
             OHLCV data for the reference symbol (e.g. SPY).
         initial_capital : float
         n_random_runs : int
-            Number of random-entry simulations to average.
+            Number of random-entry simulations; the median-outcome path is used.
         """
         strat_metrics = self.analyze(strategy_equity, strategy_trades)
+
+        # Align benchmarks to the strategy's ACTUAL traded span so the
+        # comparison is like-for-like. The strategy equity curve only covers the
+        # out-of-sample period (after walk-forward warm-up + first-train window),
+        # which is typically ~2 years shorter than the full bar history. Without
+        # this, buy-and-hold is credited with returns from years the strategy
+        # never traded.
+        if len(strategy_equity) > 0:
+            span_start, span_end = strategy_equity.index[0], strategy_equity.index[-1]
+            bars = bars.loc[(bars.index >= span_start) & (bars.index <= span_end)]
 
         # Buy and hold
         bh_equity = self._buy_and_hold_equity(bars, initial_capital)
@@ -462,7 +477,7 @@ class PerformanceAnalyzer:
         sma_equity = self._sma_trend_equity(bars, initial_capital)
         sma_metrics = self.analyze(sma_equity, pd.DataFrame(columns=["pnl", "entry_date", "exit_date", "entry_price", "exit_price", "qty", "regime", "confidence"]))
 
-        # Random entry (average of n runs)
+        # Random entry (median-outcome path across n runs)
         rand_equity = self._random_entry_equity(bars, initial_capital, strategy_trades, n_random_runs)
         rand_metrics = self.analyze(rand_equity, pd.DataFrame(columns=["pnl", "entry_date", "exit_date", "entry_price", "exit_price", "qty", "regime", "confidence"]))
 
@@ -526,9 +541,13 @@ class PerformanceAnalyzer:
 
             all_equities.append(pd.Series(equities, index=close.index))
 
-        # Average across runs
-        combined = pd.concat(all_equities, axis=1)
-        return combined.mean(axis=1)
+        # Return the MEDIAN-OUTCOME path (by final equity), not the mean of all
+        # paths. Averaging many random paths cancels their volatility and yields
+        # a near-flat curve whose Sharpe/drawdown are meaningless artifacts. The
+        # median run is a single, real random path that preserves realistic vol.
+        finals = [float(s.iloc[-1]) for s in all_equities]
+        median_run = all_equities[int(np.argsort(finals)[len(finals) // 2])]
+        return median_run
 
     # ------------------------------------------------------------------
     # Helpers
@@ -543,6 +562,34 @@ class PerformanceAnalyzer:
             avg_holding_period_days=0, expectancy=0, avg_trades_per_week=0,
             max_consecutive_losses=0, worst_day=0, worst_week=0, worst_month=0,
         )
+
+    @staticmethod
+    def comparison_to_frame(comp: "ComparisonResult") -> pd.DataFrame:
+        """Serialize a ComparisonResult to a tidy DataFrame (one row per series).
+
+        Written to ``results/comparison.csv`` so the benchmark comparison is
+        persisted, not just printed. ``total_trades`` is only meaningful for the
+        strategy row; benchmark rows are passive curves (0 trades).
+        """
+        rows = []
+        for series, m in (
+            ("strategy", comp.strategy),
+            ("buy_and_hold", comp.buy_and_hold),
+            ("sma_trend", comp.sma_trend),
+            ("random_entry", comp.random_entry),
+        ):
+            rows.append({
+                "series": series,
+                "total_return": m.total_return,
+                "annualized_return": m.annualized_return,
+                "annualized_volatility": m.annualized_volatility,
+                "sharpe_ratio": m.sharpe_ratio,
+                "sortino_ratio": m.sortino_ratio,
+                "max_drawdown": m.max_drawdown,
+                "calmar_ratio": m.calmar_ratio,
+                "total_trades": m.total_trades,
+            })
+        return pd.DataFrame(rows)
 
     # ------------------------------------------------------------------
     # Formatted output
@@ -582,8 +629,11 @@ class PerformanceAnalyzer:
     def format_comparison(self, comp: ComparisonResult) -> str:
         """Format comparison table."""
         def _row(name, m):
+            # Benchmarks are passive equity curves with no trade log, so their
+            # trade-derived stats are not meaningful — show "-" instead of 0.
+            trades = f"{m.total_trades:>6d}" if m.total_trades else f"{'-':>6}"
             return (f"  {name:<16} {m.total_return:>8.2%}  {m.annualized_return:>8.2%}  "
-                    f"{m.sharpe_ratio:>6.2f}  {m.max_drawdown:>8.2%}  {m.total_trades:>6d}")
+                    f"{m.sharpe_ratio:>6.2f}  {m.max_drawdown:>8.2%}  {trades}")
 
         header = f"  {'':16} {'TotRet':>8}  {'AnnRet':>8}  {'Sharpe':>6}  {'MaxDD':>8}  {'Trades':>6}"
         return (
@@ -596,5 +646,7 @@ class PerformanceAnalyzer:
             f"{_row('Buy & Hold', comp.buy_and_hold)}\n"
             f"{_row('200 SMA Trend', comp.sma_trend)}\n"
             f"{_row('Random Entry', comp.random_entry)}\n"
+            f"  {'-' * 64}\n"
+            f"  benchmarks span the strategy's traded window; '-' = passive (no trades)\n"
             f"{'=' * 70}"
         )
