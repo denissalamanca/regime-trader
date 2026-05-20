@@ -1,0 +1,226 @@
+# =============================================================================
+# Regime Trader — Configuration
+# =============================================================================
+
+# --- Broker Connection ---
+# Credentials are read from .env (ALPACA_API_KEY, ALPACA_SECRET_KEY).
+# NEVER put real keys in this file.
+broker:
+  # Paper trading by default — uses https://paper-api.alpaca.markets
+  # Set to false for live trading (requires explicit confirmation prompt).
+  paper_trading: true
+
+# --- Universe & Data ---
+universe:
+  # Symbols to trade (the watchlist)
+  symbols:
+    - SPY
+    - QQQ
+    - IWM
+    - AAPL
+    - MSFT
+    - GOOGL
+  # HMM training always uses daily bars regardless of signal_timeframe
+  timeframe: "1Day"
+  # How many daily bars of history to fetch for HMM fitting
+  # Must be large enough that after feature warmup (~300 bars), we have 504+ feature rows
+  lookback_bars: 1200  # ~5 years of daily bars (features consume ~300 bars of warmup)
+  # Signal generation timeframe (independent of HMM training timeframe)
+  signal_timeframe: "5Min"
+  # How many signal bars to keep in the rolling buffer
+  signal_lookback_bars: 200
+
+# --- Model Persistence ---
+model:
+  # Directory for saved HMM models
+  save_dir: "models"
+  # Max age (days) before a saved model is considered stale and retrained
+  max_age_days: 7
+  # State snapshot file for crash recovery
+  state_snapshot: "state_snapshot.json"
+
+# --- HMM Engine ---
+hmm:
+  # Model selection: test these regime counts and pick lowest BIC
+  n_candidates: [3, 4, 5]
+  # Number of random restarts per candidate (avoids local optima)
+  n_init: 10
+  # Covariance type: "full", "diag", "tied", "spherical"
+  covariance_type: "full"
+  # Maximum EM iterations per fit
+  n_iter: 200
+  # Random seed for reproducibility
+  random_state: 42
+  # Minimum number of bars before fitting the model
+  min_train_bars: 252  # ~1 year of daily bars (reduced for more WFO windows)
+  # How often to refit the model (in bars) — weekly
+  refit_interval: 5
+  # Rolling z-score window for feature standardization
+  zscore_window: 126  # ~6 months lookback for rolling z-score (less warmup, more data)
+  # --- Regime stability filter ---
+  # Bars a new regime must persist before it's "confirmed"
+  stability_bars: 3
+  # Window for measuring regime flicker rate
+  flicker_window: 20
+  # Max regime changes in flicker_window before forcing uncertainty mode
+  flicker_threshold: 4
+
+# --- Strategy ---
+# Regime labels are assigned dynamically by the HMM engine after training
+# (see hmm_engine.REGIME_LABEL_SCHEMES). Strategy selection is automatic
+# based on the regime label — no manual mapping needed.
+strategy:
+  # --- Confidence / Blending ---
+  # Minimum regime probability to act on the dominant strategy.
+  # Below this → uncertainty mode (reduce size 50%, leverage 1.0x).
+  min_confidence: 0.55
+  # Regimes with probability above this threshold contribute to blending.
+  blend_threshold: 0.15
+  # Position size multiplier in uncertainty mode (0.5 = half size).
+  uncertainty_size_mult: 0.50
+  # --- Swing detection ---
+  # Lookback for identifying support/resistance swing levels
+  swing_lookback: 20
+  swing_count: 5
+  # --- Per-strategy tuning ---
+  # These can be overridden per strategy archetype if needed.
+  crash_defensive:
+    vol_exit_std: 2.0           # Exit if realized vol > this many std above mean
+    volume_surge_threshold: 1.5 # Volume vs 20-period avg for reversal entry
+  bear_trend:
+    adx_min: 25                 # Minimum ADX to confirm trend
+    stop_atr_mult: 1.5          # Stop distance above entry
+    reward_risk: 2.5            # Take-profit R:R ratio
+  distribution_fade:
+    stop_atr_above_resistance: 0.5
+    rsi_divergence_lookback: 20
+  mean_reversion:
+    min_range_atr: 2.0          # Minimum range width in ATR
+    squeeze_kc_mult: 1.5        # Keltner Channel multiplier for squeeze detection
+    leverage_range_atr: 4.0     # Range must be this wide for 1.25x leverage
+  accumulation_pullback:
+    pullback_volume_lookback: 5 # Bars to check for declining volume on pullback
+    scale_in_initial_pct: 0.06  # First tranche = 50% of full 12% allocation
+  bull_trend:
+    adx_min: 25
+    trail_stop_atr: 2.0         # ATR multiplier for trailing stop
+    leverage_min_prob: 0.60     # Min regime probability for 1.25x leverage
+    flat_tighten_bars: 10       # Tighten stop if position flat for this many bars
+    flat_tighten_atr: 1.0       # Tightened stop ATR multiplier
+  euphoria_cautious:
+    tighten_stops_atr: 1.0      # Force all trailing stops to this ATR mult
+    reversal_volume_window: 50  # Window for volume climax detection
+
+# --- Risk Management ---
+# The risk manager is the FINAL GATEKEEPER — it operates independently of
+# regime detection. Even if the HMM fails, circuit breakers catch drawdowns.
+#
+# HARDCODED LIMITS (cannot be loosened via config, only tightened):
+#   Max exposure: 80%  |  Max single position: 15%  |  Max leverage: 1.25x
+#   Max concurrent positions: 5  |  Max daily trades: 20
+#   Max risk per trade: 1%  |  Min position: $100
+risk:
+  # Config values can only be TIGHTER than hardcoded limits, never looser.
+  max_portfolio_exposure: 0.80    # Fraction of equity — 20% cash minimum always
+  max_position_size: 0.50         # Fraction of equity (increased for regime allocation)
+  max_leverage: 1.25              # Portfolio-wide cap (hardcoded max: 1.25x)
+  risk_per_trade: 0.01            # Max loss if stop hit (hardcoded max: 1%) — used by risk manager
+  min_position_value: 100         # USD — skip trade if below this
+  # --- Circuit Breakers ---
+  # Based on ACTUAL P&L, independent of regime detection.
+  # Values can only be tighter than the hardcoded defaults.
+  circuit_breakers:
+    daily_drawdown_reduce: 0.02   # 2% daily DD → reduce sizes 50%
+    daily_drawdown_halt: 0.03     # 3% daily DD → close all, halt rest of day
+    weekly_drawdown_reduce: 0.05  # 5% weekly DD → reduce sizes 50%
+    weekly_drawdown_halt: 0.07    # 7% weekly DD → close all, halt rest of week
+    peak_drawdown_halt: 0.10      # 10% from peak → halt, require manual restart
+
+# --- Order Execution ---
+execution:
+  # Order type: "limit" by default (not market) to control slippage
+  default_order_type: "limit"
+  # Limit price offset from entry price (fraction) — adds this to buy, subtracts from sell
+  limit_offset_pct: 0.001
+  # Maximum slippage tolerance (fraction)
+  max_slippage: 0.005
+  # Time-in-force: "day", "gtc", "ioc", "fok"
+  time_in_force: "day"
+  # Cancel unfilled limit orders after this many seconds, then optionally retry at market
+  cancel_after_seconds: 30
+  # If true, chase unfilled limit orders at market price after cancel
+  chase_at_market: false
+  # Number of retry attempts for failed orders
+  retry_attempts: 1
+  retry_delay_seconds: 2
+
+# --- Scheduling ---
+schedule:
+  # Market open check (ET)
+  pre_market_check: "09:00"
+  # Main trading loop start (ET)
+  trading_start: "09:35"
+  # Main trading loop end (ET)
+  trading_end: "15:50"
+  # End-of-day reconciliation (ET)
+  eod_reconcile: "16:05"
+  # Loop interval in seconds during active trading
+  loop_interval_seconds: 60
+
+# --- Monitoring ---
+monitoring:
+  # Logging level: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+  # Log directory (files: main.log, trades.log, alerts.log, regime.log)
+  log_dir: "logs"
+  # Use structured JSON format for log files (human-readable on console)
+  json_log_files: true
+  # Enable terminal dashboard (Rich-based live display)
+  dashboard_enabled: true
+  # Dashboard refresh interval in seconds
+  dashboard_refresh_seconds: 5
+  # --- Alerts ---
+  alerts:
+    enabled: true
+    # Rate limiting: minimum seconds between repeated alerts of the same type
+    cooldown_seconds: 900           # 15 minutes
+    # Alert triggers (all produce console + log; email/webhook for WARNING+)
+    on_regime_change: true          # WARNING
+    on_circuit_breaker: true        # CRITICAL
+    on_large_trade_pnl: true        # WARNING — P&L > 1% of portfolio
+    on_daily_pnl_threshold: true    # INFO — daily P&L exceeds +/- 1.5%
+    on_data_disconnect: true        # ERROR — data feed disconnected > 60s
+    on_api_disconnect: true         # ERROR
+    on_hmm_retrained: true          # INFO
+    on_flicker_threshold: true      # WARNING
+    # Daily P&L alert threshold (fraction)
+    daily_pnl_alert_threshold: 0.015
+    # Trade P&L alert threshold (fraction of equity)
+    large_trade_pnl_threshold: 0.01
+
+# --- Backtesting ---
+backtest:
+  start_date: "2018-01-01"
+  end_date: "2025-12-31"
+  initial_capital: 100000
+  commission: 0.0                   # Alpaca is commission-free
+  slippage_pct: 0.0005              # 0.05% slippage per side
+  fill_delay_bars: 1                # Signal on bar N → fill on bar N+1 open
+  risk_free_rate: 0.045             # For Sharpe/Sortino (annualized)
+  # Walk-forward optimization windows
+  walk_forward:
+    train_window: 252               # ~1 year IS window
+    test_window: 63                 # ~3 months OOS window
+    step_size: 126                  # ~6 months step (less retraining = more stable)
+  # Stress testing
+  stress_test:
+    crash_magnitudes: [-0.05, -0.08, -0.10, -0.15]
+    gap_magnitudes: [-0.02, -0.03, -0.05]
+    vol_spike_factor: 3.0
+    n_crash_simulations: 100        # Monte Carlo crash injection count
+  # Output paths
+  output:
+    equity_curve_csv: "results/equity_curve.csv"
+    trade_log_csv: "results/trade_log.csv"
+    regime_history_csv: "results/regime_history.csv"
+    comparison_csv: "results/comparison.csv"
