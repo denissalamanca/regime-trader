@@ -212,7 +212,11 @@ The backtester uses rolling in-sample / out-of-sample windows:
                                           |--- 2yr Train ---|--- 6mo Test ---|
 ```
 
-Each test window uses a freshly trained HMM. Fills include slippage, 1-bar delay, and overnight gap-through simulation.
+Each test window uses a freshly trained HMM. Single-asset fills include slippage; the pair path also models 1-bar delay and overnight gap-through.
+
+**Sizing modes.** By default the backtest applies each strategy's raw target allocation (the *idealized* run). Set `backtest.apply_risk_manager: true` to size through the live risk manager instead (1%-risk sizing + exposure/leverage caps) — a more conservative "what risk management would have done" view (typically much lower drawdown *and* return).
+
+**Reading the outputs.** The **equity curve** (`results/equity_curve.csv`, guarded by a SHA-256 regression test) is the ground truth for performance. The **trade log** (`results/trade_log.csv`) records rebalance/close *events* via a gate, not clean entry→exit round-trips, so its summed P&L is an approximation that may not tie exactly to the equity curve (~7% on the SPY baseline) — use it for direction/regime attribution, not exact P&L.
 
 ## CLI Reference
 

@@ -15,8 +15,19 @@ Pair strategies are handled via a separate path:
 - If a single leg of an existing pair gets force-closed (orphan), close the
   surviving leg at the next bar's open with doubled slippage.
 
-Single-asset signals continue to rebalance at the close on the same bar
-without slippage — this preserves the Phase A baseline numerics.
+Single-asset signals rebalance at the close on the same bar, with slippage
+charged on each fill (B2).
+
+Sizing: by default the backtest applies the strategy's raw target allocation
+(the "idealized" run). Set ``backtest.apply_risk_manager: true`` to instead size
+through the live RiskManager (1%-risk sizing + exposure/leverage/correlation
+caps) — a more conservative "what risk management would have done" view (B1).
+
+Trade-log caveat (B3): trades are recorded on rebalance/close *events* via a
+rebalance gate, NOT as clean entry→exit round-trips. The summed trade P&L is
+therefore an approximation and may not tie exactly to the equity curve (~7% on
+the SPY baseline). Treat the equity curve (and its regression hash) as ground
+truth; use the trade log for direction/regime attribution, not exact P&L.
 """
 
 from __future__ import annotations
@@ -222,6 +233,11 @@ class WalkForwardBacktester:
         self._slippage = bt.get("slippage_pct", 0.0005)
         self._commission = bt.get("commission", 0.0)
         self._rf = bt.get("risk_free_rate", 0.045)
+        # B1: optionally route single-asset sizing through the live RiskManager
+        # (1%-risk sizing + exposure/leverage/correlation caps). Default off so
+        # the idealized backtest — and its committed baseline — is unchanged.
+        self._apply_risk = bool(bt.get("apply_risk_manager", False))
+        self._risk_config = config.get("risk", {})
 
         self._fill_sim = FillSimulator(self._slippage, self._commission)
 
@@ -265,6 +281,56 @@ class WalkForwardBacktester:
         return equity
 
     # ------------------------------------------------------------------
+    # B1: risk-managed sizing (optional, default off)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _risk_managed_shares(risk_mgr, sig, equity, positions, bars_now, price, regime, hmm) -> int:
+        """Target signed share count from the RiskManager (B1); 0 = flat.
+
+        Applies risk-based sizing + exposure/leverage/correlation caps. Drawdown
+        circuit breakers are deliberately NOT driven here: they're a live,
+        intraday-P&L mechanism (and the peak-DD halt writes a flag file), which
+        doesn't fit a multi-year daily backtest — so this models sizing + caps.
+        """
+        from core.regime_strategies import SignalDirection
+        from core.risk_manager import PortfolioState, CircuitBreakerStatus
+
+        if sig.direction == SignalDirection.FLAT:
+            return 0
+
+        # Context EXCLUDING the symbol being rebalanced, so the manager sizes it
+        # as a fresh position rather than double-counting the one we're resizing.
+        other_vals: dict[str, float] = {}
+        for s, p in positions.items():
+            if s == sig.symbol or p.qty == 0:
+                continue
+            sb = bars_now.get(s)
+            px = float(sb["close"].iloc[-1]) if sb is not None and len(sb) > 0 else p.entry_price
+            other_vals[s] = p.qty * px
+
+        exposure = sum(abs(v) for v in other_vals.values())
+        portfolio = PortfolioState(
+            equity=equity, cash=equity, buying_power=equity,
+            positions=other_vals, position_count=len(other_vals),
+            daily_pnl=0.0, weekly_pnl=0.0, peak_equity=equity,
+            day_start_equity=equity, week_start_equity=equity,
+            current_drawdown_pct=0.0,
+            total_exposure=exposure / equity if equity > 0 else 0.0,
+            max_single_exposure=(max((abs(v) for v in other_vals.values()), default=0.0) / equity
+                                 if equity > 0 else 0.0),
+            daily_trade_count=0,
+            circuit_breaker=CircuitBreakerStatus(),  # not halted; breakers are live-only
+            regime_label=regime.label, regime_probability=regime.probability,
+            flicker_rate=hmm.get_regime_flicker_rate(),
+        )
+        decision = risk_mgr.validate_signal(sig, portfolio, bars=bars_now, for_backtest=True)
+        if not decision.approved or decision.modified_signal is None:
+            return 0
+        qty = int(decision.modified_signal.metadata.get("risk_sized_qty", 0))
+        return qty if sig.direction == SignalDirection.LONG else -qty
+
+    # ------------------------------------------------------------------
     # Main run loop
     # ------------------------------------------------------------------
 
@@ -290,6 +356,12 @@ class WalkForwardBacktester:
         hmm = HMMEngine(self._config.get("hmm", {}))
         orch = None
         hmm_fitted = False
+
+        # B1: a RiskManager for the optional risk-managed sizing path (default off).
+        risk_mgr = None
+        if self._apply_risk:
+            from core.risk_manager import RiskManager
+            risk_mgr = RiskManager(self._risk_config)
 
         # ref_sym is used for HMM regime detection (always same single symbol's bars
         # produce the features); per-symbol price lookups go through `bars[sym]`.
@@ -417,14 +489,6 @@ class WalkForwardBacktester:
                 # Get/create per-symbol state
                 pos = positions.setdefault(sig.symbol, SimPosition(symbol=sig.symbol))
 
-                # --- Compute target allocation from this signal ---
-                if sig.direction == SignalDirection.LONG:
-                    target_alloc = sig.position_size_pct * sig.leverage
-                elif sig.direction == SignalDirection.SHORT:
-                    target_alloc = -sig.position_size_pct * sig.leverage
-                else:
-                    target_alloc = 0.0
-
                 # Update per-bar metadata that legacy code set on every signal,
                 # not just on rebalance bars (entry_confidence in Phase A).
                 pos.entry_confidence = sig.confidence
@@ -434,7 +498,23 @@ class WalkForwardBacktester:
                 # For SPY-only this is `cash + qty * price`.
                 equity = self._mark_to_market(cash, positions, bars, date)
 
-                target_shares_new = int(equity * target_alloc / price) if price > 0 else 0
+                if self._apply_risk:
+                    # B1: size via the RiskManager (1%-risk sizing + caps) instead
+                    # of the raw strategy allocation. target_alloc is the implied
+                    # allocation, used only by the rebalance gate below.
+                    target_shares_new = self._risk_managed_shares(
+                        risk_mgr, sig, equity, positions, bars_now, price, regime, hmm)
+                    target_alloc = (target_shares_new * price / equity) if equity > 0 else 0.0
+                else:
+                    # --- Idealized: target allocation straight from the signal ---
+                    if sig.direction == SignalDirection.LONG:
+                        target_alloc = sig.position_size_pct * sig.leverage
+                    elif sig.direction == SignalDirection.SHORT:
+                        target_alloc = -sig.position_size_pct * sig.leverage
+                    else:
+                        target_alloc = 0.0
+                    target_shares_new = int(equity * target_alloc / price) if price > 0 else 0
+
                 size_change = abs(target_shares_new - pos.qty)
 
                 # Rebalance gate (matches Phase A line 268)

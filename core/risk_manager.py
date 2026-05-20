@@ -463,11 +463,18 @@ class RiskManager:
         portfolio: PortfolioState,
         bars: Optional[dict[str, pd.DataFrame]] = None,
         is_overnight: bool = False,
+        for_backtest: bool = False,
     ) -> RiskDecision:
         """Validate a signal against all risk rules. This is THE method.
 
         Runs every check in sequence, accumulating modifications. Any single
         check can veto the entire trade.
+
+        ``for_backtest=True`` bypasses the two live-execution-only guards — the
+        wall-clock duplicate-order window and the per-day trade-count limit/
+        increment — which don't translate to a vectorized backtest (many bars
+        process within the 60s window; the daily counter never resets there).
+        Sizing, exposure, leverage, and correlation checks still apply.
 
         Parameters
         ----------
@@ -509,7 +516,7 @@ class RiskManager:
             return self._reject(signal, "Stop loss equals entry price — zero risk distance")
 
         # --- 3. Max daily trades ---
-        if self._daily_trade_count >= MAX_DAILY_TRADES:
+        if not for_backtest and self._daily_trade_count >= MAX_DAILY_TRADES:
             return self._reject(
                 signal,
                 f"Max daily trades reached ({MAX_DAILY_TRADES}). Preventing overtrading.",
@@ -525,7 +532,7 @@ class RiskManager:
                 )
 
         # --- 5. Duplicate order check ---
-        if self._is_duplicate(signal):
+        if not for_backtest and self._is_duplicate(signal):
             return self._reject(
                 signal,
                 f"Duplicate order: {signal.symbol} {signal.direction.value} "
@@ -621,9 +628,11 @@ class RiskManager:
             },
         )
 
-        # Record the trade
-        self._record_order(signal)
-        self._daily_trade_count += 1
+        # Record the trade (live only; in backtest the duplicate / daily-count
+        # guards are bypassed, so there is nothing to track between bars).
+        if not for_backtest:
+            self._record_order(signal)
+            self._daily_trade_count += 1
 
         return RiskDecision(
             approved=True,
