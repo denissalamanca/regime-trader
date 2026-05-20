@@ -1,0 +1,41 @@
+{
+  "symbol": "SPY",
+  "input_fixture": "regression_SPY_bars.csv",
+  "n_input_bars": 1259,
+  "input_range": [
+    "2018-01-02",
+    "2022-12-30"
+  ],
+  "config": {
+    "hmm.n_candidates": [
+      3,
+      4,
+      5
+    ],
+    "hmm.zscore_window": 126,
+    "hmm.min_train_bars": 252,
+    "hmm.random_state": 42,
+    "backtest.walk_forward": {
+      "train_window": 252,
+      "test_window": 63,
+      "step_size": 126
+    },
+    "backtest.slippage_pct": 0.0005,
+    "backtest.apply_risk_manager": false,
+    "risk.max_leverage": 1.25
+  },
+  "equity_curve": {
+    "first_date": "2020-01-16",
+    "last_date": "2022-10-14",
+    "n_bars": 693,
+    "starting_equity": 100000.0,
+    "ending_equity": 112708.08,
+    "sha256": "68d3cf0f0d50deb2b83f6fcae5de2c87cccc0d3005506c26cc3f1782ab86a763"
+  },
+  "metrics": {
+    "total_return": 0.12708085,
+    "sharpe_ratio": 0.071773,
+    "max_drawdown": 0.17172867,
+    "total_trades": 45
+  }
+}
