@@ -28,14 +28,14 @@
     "first_date": "2020-01-16",
     "last_date": "2022-10-14",
     "n_bars": 693,
-    "starting_equity": 100000.0,
-    "ending_equity": 112708.08,
-    "sha256": "68d3cf0f0d50deb2b83f6fcae5de2c87cccc0d3005506c26cc3f1782ab86a763"
+    "starting_equity": 99952.52,
+    "ending_equity": 111700.78,
+    "sha256": "939e2c5d2d20277db39a7dc29f63e25d94fe5afce084a86023cd54a13a81a8b8"
   },
   "metrics": {
-    "total_return": 0.12708085,
-    "sharpe_ratio": 0.071773,
-    "max_drawdown": 0.17172867,
+    "total_return": 0.11753842,
+    "sharpe_ratio": 0.052616,
+    "max_drawdown": 0.17244893,
     "total_trades": 45
   }
 }

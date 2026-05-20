@@ -42,6 +42,11 @@ def _compute_atr(bars: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
 
 
+def _slip_fill(price: float, buying: bool, slippage: float) -> float:
+    """Apply slippage to a fill price (B2): buys fill above, sells below."""
+    return price * (1.0 + slippage) if buying else price * (1.0 - slippage)
+
+
 # ---------------------------------------------------------------------------
 # Per-symbol simulation state
 # ---------------------------------------------------------------------------
@@ -436,7 +441,9 @@ class WalkForwardBacktester:
                 if size_change > abs(pos.qty) * 0.10 + 1 and abs(target_alloc - pos.prev_alloc) > 0.05:
                     # Trade-record gate: only record when closing/flipping an existing position
                     if pos.qty != 0 and abs(target_alloc - pos.prev_alloc) > 0.15:
-                        exit_price = price
+                        # Exit fill with slippage (B2): closing a long sells
+                        # (fills below), closing a short buys (fills above).
+                        exit_price = _slip_fill(price, buying=(pos.qty < 0), slippage=self._slippage)
                         pnl = (exit_price - pos.entry_price) * pos.qty
                         denom = abs(pos.entry_price * pos.qty)
                         trades.append(Trade(
@@ -452,14 +459,18 @@ class WalkForwardBacktester:
                             regime=pos.entry_regime,
                             confidence=pos.entry_confidence,
                             strategy="regime_alloc",
+                            stop_price=pos.stop_price,  # B4: record the stop in effect
                         ))
                         win_trades += 1
 
-                    # Apply rebalance — same delta-shares accounting at close
+                    # Apply rebalance with slippage on the fill (B2): buys fill
+                    # above the close, sells below.
                     delta = target_shares_new - pos.qty
-                    cash -= delta * price
+                    fill_price = _slip_fill(price, buying=(delta > 0), slippage=self._slippage)
+                    cash -= delta * fill_price
                     pos.qty = target_shares_new
-                    pos.entry_price = price
+                    pos.entry_price = fill_price
+                    pos.stop_price = sig.stop_loss      # B4: capture the signal's stop
                     pos.entry_date = date
                     pos.entry_regime = regime.label
                     pos.prev_alloc = target_alloc
@@ -523,7 +534,13 @@ class WalkForwardBacktester:
                 continue
             sym_bars = bars.get(sym)
             if sym_bars is not None and last_date in sym_bars.index:
-                exit_price = float(sym_bars.loc[last_date, "close"])
+                close_px = float(sym_bars.loc[last_date, "close"])
+                # Slippage on the final close for single-asset positions (B2);
+                # pair positions keep their existing fill handling.
+                if pos.pair_id is None:
+                    exit_price = _slip_fill(close_px, buying=(pos.qty < 0), slippage=self._slippage)
+                else:
+                    exit_price = close_px
             else:
                 exit_price = pos.entry_price
             pnl = (exit_price - pos.entry_price) * pos.qty
@@ -545,6 +562,7 @@ class WalkForwardBacktester:
                 # Phase A baseline. Pair-related trades carry the actual
                 # strategy_name (set elsewhere).
                 strategy="regime_alloc" if pos.pair_id is None else (pos.strategy_name or "regime_alloc"),
+                stop_price=pos.stop_price,
                 pair_id=pos.pair_id,
             ))
             cash += pos.qty * exit_price
