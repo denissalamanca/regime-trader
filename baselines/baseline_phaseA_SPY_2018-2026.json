@@ -1,0 +1,226 @@
+{
+  "phase": "A",
+  "captured_at": "2026-04-27",
+  "command": "python3 main.py backtest --symbols SPY --start 2018-01-01 --end 2026-04-27 --compare",
+  "data_source": "data_cache/SPY_1Day.csv",
+  "config_snapshot": {
+    "hmm.n_candidates": [
+      3,
+      4,
+      5
+    ],
+    "hmm.zscore_window": 126,
+    "hmm.min_train_bars": 252,
+    "backtest.walk_forward.train_window": 252,
+    "backtest.walk_forward.test_window": 63,
+    "backtest.walk_forward.step_size": 126,
+    "risk.max_position_size": 0.5,
+    "risk.max_leverage": 1.25
+  },
+  "equity_curve": {
+    "first_date": "2020-01-16",
+    "last_date": "2026-04-23",
+    "n_bars": 1575,
+    "starting_equity": 100000.0,
+    "ending_equity": 189575.185,
+    "peak_equity": 190276.225,
+    "trough_equity": 83223.32500000001,
+    "sha256_first16": "7f7b9dce24d525a3"
+  },
+  "performance_metrics": {
+    "total_return": 0.8958,
+    "annualized_return": 0.1078,
+    "annualized_volatility": 0.1417,
+    "sharpe_ratio": 0.48,
+    "sortino_ratio": 0.61,
+    "max_drawdown": 0.1751,
+    "max_drawdown_duration_days": 518,
+    "calmar_ratio": 0.62,
+    "total_trades": 158,
+    "win_rate": 0.6266,
+    "profit_factor": 1.8,
+    "avg_win": 2128.21,
+    "avg_loss": -2015.36,
+    "expectancy": 580.93,
+    "avg_holding_period_days": 14.1,
+    "avg_trades_per_week": 0.5,
+    "worst_day": -0.0622,
+    "worst_week": -0.0762,
+    "worst_month": -0.0913,
+    "max_consecutive_losses": 4
+  },
+  "regime_breakdown": {
+    "BEAR": {
+      "trades": 53,
+      "pnl": 32189.0,
+      "win_rate": 0.68,
+      "sharpe": 0.11
+    },
+    "EUPHORIA": {
+      "trades": 26,
+      "pnl": 29237.4,
+      "win_rate": 0.65,
+      "sharpe": 0.9
+    },
+    "BULL": {
+      "trades": 54,
+      "pnl": 28161.24,
+      "win_rate": 0.63,
+      "sharpe": 0.62
+    },
+    "CRASH": {
+      "trades": 10,
+      "pnl": 5516.41,
+      "win_rate": 0.6,
+      "sharpe": 1.95
+    },
+    "NEUTRAL": {
+      "trades": 15,
+      "pnl": -1302.51,
+      "win_rate": 0.4,
+      "sharpe": -0.19
+    }
+  },
+  "confidence_buckets": {
+    "lt_50": {
+      "trades": 0,
+      "pnl": 0.0,
+      "win_rate": 0.0,
+      "sharpe": 0.0
+    },
+    "50_to_60": {
+      "trades": 4,
+      "pnl": 1663.24,
+      "win_rate": 0.5,
+      "sharpe": 5.23
+    },
+    "60_to_70": {
+      "trades": 2,
+      "pnl": -1689.72,
+      "win_rate": 0.0,
+      "sharpe": -13.04
+    },
+    "70_plus": {
+      "trades": 152,
+      "pnl": 93828.01,
+      "win_rate": 0.64,
+      "sharpe": 2.72
+    }
+  },
+  "benchmark_comparison": {
+    "strategy": {
+      "total_return": 0.8958,
+      "annualized_return": 0.1078,
+      "sharpe": 0.48,
+      "max_drawdown": 0.1751,
+      "trades": 158
+    },
+    "buy_and_hold": {
+      "total_return": 1.6563,
+      "annualized_return": 0.1251,
+      "sharpe": 0.48,
+      "max_drawdown": 0.3418,
+      "trades": 0
+    },
+    "sma_200_trend": {
+      "total_return": 0.7984,
+      "annualized_return": 0.0734,
+      "sharpe": 0.28,
+      "max_drawdown": 0.2082,
+      "trades": 0
+    },
+    "random_entry": {
+      "total_return": -0.0029,
+      "annualized_return": -0.0003,
+      "sharpe": -28.68,
+      "max_drawdown": 0.0063,
+      "trades": 0
+    }
+  },
+  "walk_forward_windows": [
+    {
+      "window_id": 0,
+      "test_period": "2019-07-18 to 2020-10-14",
+      "trades": 15,
+      "return_pct": -0.0151
+    },
+    {
+      "window_id": 1,
+      "test_period": "2020-01-16 to 2021-04-16",
+      "trades": 14,
+      "return_pct": 0.1502
+    },
+    {
+      "window_id": 2,
+      "test_period": "2020-07-17 to 2021-10-14",
+      "trades": 3,
+      "return_pct": 0.1272
+    },
+    {
+      "window_id": 3,
+      "test_period": "2021-01-15 to 2022-04-14",
+      "trades": 15,
+      "return_pct": 0.0301
+    },
+    {
+      "window_id": 4,
+      "test_period": "2021-07-19 to 2022-10-14",
+      "trades": 6,
+      "return_pct": -0.0915
+    },
+    {
+      "window_id": 5,
+      "test_period": "2022-01-14 to 2023-04-18",
+      "trades": 15,
+      "return_pct": 0.0022
+    },
+    {
+      "window_id": 6,
+      "test_period": "2022-07-19 to 2023-10-17",
+      "trades": 15,
+      "return_pct": 0.1185
+    },
+    {
+      "window_id": 7,
+      "test_period": "2023-01-18 to 2024-04-18",
+      "trades": 10,
+      "return_pct": 0.0368
+    },
+    {
+      "window_id": 8,
+      "test_period": "2023-07-20 to 2024-10-17",
+      "trades": 20,
+      "return_pct": 0.0961
+    },
+    {
+      "window_id": 9,
+      "test_period": "2024-01-19 to 2025-04-22",
+      "trades": 12,
+      "return_pct": 0.0648
+    },
+    {
+      "window_id": 10,
+      "test_period": "2024-07-22 to 2025-10-21",
+      "trades": 10,
+      "return_pct": 0.0768
+    },
+    {
+      "window_id": 11,
+      "test_period": "2025-01-22 to 2026-04-23",
+      "trades": 12,
+      "return_pct": 0.0664
+    }
+  ],
+  "regression_hashes": {
+    "equity_curve_sha256_first16": "7f7b9dce24d525a3",
+    "trade_log_sha256_first16": "e122038496db2430",
+    "n_trades": 158,
+    "n_equity_points": 1575,
+    "n_regime_predictions": 1575
+  },
+  "phase_b_acceptance_criteria": [
+    "Single-asset SPY backtest with --symbols SPY produces equity_curve_sha256_first16 == this baseline",
+    "OR if hashes drift due to legitimate refactor: total_return within +/-0.5pp, sharpe within +/-0.05, max_drawdown within +/-1pp, total_trades within +/-3",
+    "Pair backtester functionality additions must NOT alter single-asset path numerically"
+  ]
+}
