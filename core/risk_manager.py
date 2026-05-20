@@ -11,14 +11,14 @@ The risk manager has ABSOLUTE VETO POWER over any signal.
 
 HARDCODED NON-NEGOTIABLE RULES:
 - Max total exposure: 80% of portfolio (20% cash minimum)
-- Max single position: 15% of portfolio
-- Max correlated exposure: 30% in any correlated group
+- Max single position: 50% of portfolio (raised from 15% for regime allocation)
 - Max concurrent positions: 5
 - Max daily trades: 20
 - Max portfolio leverage: 1.25x
 - Every position MUST have a stop loss — no exceptions
 - Max risk per trade: 1% of portfolio
 - Minimum position size: $100
+- Correlated names: reject a new position at >0.85 corr, halve size at >0.70
 
 CIRCUIT BREAKERS (based on ACTUAL P&L, independent of regime):
 - Daily  DD > 2%:  reduce sizes 50%
@@ -52,7 +52,6 @@ logger = logging.getLogger(__name__)
 
 MAX_TOTAL_EXPOSURE: float = 0.80       # 80% of equity
 MAX_SINGLE_POSITION: float = 0.50      # 50% of equity (was 15% — increased for regime-based allocation)
-MAX_CORRELATED_EXPOSURE: float = 0.30  # 30% in correlated group
 MAX_CONCURRENT_POSITIONS: int = 5
 MAX_DAILY_TRADES: int = 20
 MAX_PORTFOLIO_LEVERAGE: float = 1.25

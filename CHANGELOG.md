@@ -20,4 +20,4 @@ Initial public release of the Regime Trader template.
 - Stress testing utilities (crash injection, gap simulation, Monte Carlo)
 - Structured JSON logging across 4 rotating files
 - Email and webhook alerts with rate limiting
-- 98+ unit and integration tests
+- 216 unit and integration tests (plus 6 live Alpaca-connectivity tests, skipped without API keys)

@@ -331,7 +331,10 @@ class WalkForwardBacktester:
                         "pnl": equity - win_start_eq,
                         "return_pct": (equity / win_start_eq - 1) if win_start_eq > 0 else 0,
                         "n_regimes": hmm.n_regimes if hmm_fitted else 0,
-                        **win,
+                        # Attach the dates of the window being CLOSED (win_id-1),
+                        # not `win` (the one we're now retraining) — using `win`
+                        # was an off-by-one that mislabeled every window's range.
+                        **windows[win_id - 1],
                     })
                 win_start_eq = equity
                 win_trades = 0
@@ -465,15 +468,9 @@ class WalkForwardBacktester:
             for ps in pair_signals:
                 self._enqueue_pair_fill(ps, bars_now, date, equity, pending_pair_fills)
 
-            # --- Orphan-leg detection: if one leg of a pair closed and the
-            # other is still open, force-close the orphan at the next bar's
-            # open with doubled slippage. Detect here, queue closure for next
-            # bar's processing.
-            self._detect_and_close_orphans(
-                pair_links, positions, bars, date, cash_ref=lambda c=cash: c,
-            )
-            # _detect_and_close_orphans modifies positions/cash via callbacks below
-            # so we do the actual closure inline here:
+            # --- Orphan-leg closure: if one leg of a pair is open and its
+            # sibling isn't, force-close the orphan at the next bar's open with
+            # doubled slippage.
             for orphan_sym, link_pair_id in list(self._iter_orphans(pair_links, positions)):
                 pos = positions.get(orphan_sym)
                 if pos is None or pos.qty == 0:
@@ -557,12 +554,17 @@ class WalkForwardBacktester:
         self._attribute_pair_pnl(trades)
 
         # --- Final window record ---
-        window_results.append({
+        final_rec = {
             "window_id": win_id - 1, "n_trades": win_trades,
             "pnl": equity - win_start_eq,
             "return_pct": (equity / win_start_eq - 1) if win_start_eq > 0 else 0,
             "n_regimes": hmm.n_regimes if hmm_fitted else 0,
-        })
+        }
+        # Include the final window's dates (previously omitted, so the last
+        # window printed with no date range).
+        if 0 <= win_id - 1 < len(windows):
+            final_rec.update(windows[win_id - 1])
+        window_results.append(final_rec)
 
         # --- Build output ---
         eq_series = pd.Series({d: v for d, v in equity_points}, name="equity").sort_index()
@@ -836,19 +838,6 @@ class WalkForwardBacktester:
                 yield long_sym, pair_id
             elif short_open and not long_open:
                 yield short_sym, pair_id
-
-    def _detect_and_close_orphans(
-        self,
-        pair_links: dict[str, tuple[str, str]],
-        positions: dict[str, SimPosition],
-        bars: dict[str, pd.DataFrame],
-        date: pd.Timestamp,
-        cash_ref,  # callable returning current cash; not used (callers iterate _iter_orphans)
-    ) -> None:
-        """Reserved for future hook-style orphan handling. Currently the run
-        loop iterates ``_iter_orphans`` directly to keep cash mutation in scope.
-        """
-        return None
 
     # ------------------------------------------------------------------
     # Pair PnL attribution
