@@ -1,0 +1,53 @@
+# Credentials — NEVER commit
+.env
+config/credentials.yaml
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# Model artifacts
+models/
+*.pkl
+*.pickle
+
+# Cached historical bars (regenerated from Alpaca on demand)
+data_cache/
+
+# Trading halt flag
+TRADING_HALTED.flag
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Run outputs (regenerated each backtest/live run; committed references live in baselines/)
+results/*.csv
+!results/.gitkeep
