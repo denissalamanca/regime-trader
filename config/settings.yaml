@@ -210,6 +210,9 @@ backtest:
   slippage_pct: 0.0005              # 0.05% slippage per side
   fill_delay_bars: 1                # Signal on bar N → fill on bar N+1 open
   risk_free_rate: 0.045             # For Sharpe/Sortino (annualized)
+  # B1: route single-asset sizing through the RiskManager (1%-risk sizing +
+  # exposure/leverage caps). false = idealized strategy backtest (the default).
+  apply_risk_manager: false
   # Walk-forward optimization windows
   walk_forward:
     train_window: 252               # ~1 year IS window
