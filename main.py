@@ -489,10 +489,9 @@ class TradingLoop:
                 )
             else:
                 try:
-                    if sig.take_profit:
-                        result = self._executor.submit_bracket_order(decision.modified_signal)
-                    else:
-                        result = self._executor.submit_order(decision.modified_signal)
+                    # Always attach a protective stop at the broker (BRACKET when
+                    # a take-profit exists, else OTO). Never submit a bare entry.
+                    result = self._executor.submit_bracket_order(decision.modified_signal)
                     self._trade_count += 1
                     logger.info("Order submitted: %s %s (trade_id=%s, status=%s)",
                                 sig.symbol, sig.direction.value,

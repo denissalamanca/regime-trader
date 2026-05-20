@@ -192,6 +192,47 @@ class TestOrderExecutor:
         results = executor.cancel_all()
         assert len(executor._pending_orders) == 0
 
+    def _long_signal(self, take_profit):
+        from core.regime_strategies import Signal, SignalDirection
+        return Signal(
+            symbol="SPY", direction=SignalDirection.LONG, confidence=0.9,
+            entry_price=450.0, stop_loss=445.0, take_profit=take_profit,
+            position_size_pct=0.5, leverage=1.0, regime_id=1, regime_name="BULL",
+            regime_probability=0.9, timestamp=pd.Timestamp.now(),
+            reasoning="t", strategy_name="t", metadata={"risk_sized_qty": 10},
+        )
+
+    def test_entry_without_target_uses_oto_with_stop(self, executor, mock_client):
+        """A1: an entry with no take-profit still brings a resting stop (OTO)."""
+        from alpaca.trading.enums import OrderClass
+        mock_client.trading_client = MagicMock()
+        order = MagicMock(); order.id = "OTO-1"; order.status = "accepted"
+        mock_client.trading_client.submit_order.return_value = order
+
+        result = executor.submit_bracket_order(self._long_signal(take_profit=None))
+
+        assert result.status != OrderStatus.FAILED
+        req = mock_client.trading_client.submit_order.call_args[0][0]
+        assert req.order_class == OrderClass.OTO
+        assert req.stop_loss is not None
+        assert req.take_profit is None
+        assert float(req.stop_loss.stop_price) == 445.0
+
+    def test_entry_with_target_uses_full_bracket(self, executor, mock_client):
+        """A1: an entry with a take-profit uses a full bracket (entry+stop+target)."""
+        from alpaca.trading.enums import OrderClass
+        mock_client.trading_client = MagicMock()
+        order = MagicMock(); order.id = "BR-1"; order.status = "accepted"
+        mock_client.trading_client.submit_order.return_value = order
+
+        result = executor.submit_bracket_order(self._long_signal(take_profit=470.0))
+
+        assert result.status != OrderStatus.FAILED
+        req = mock_client.trading_client.submit_order.call_args[0][0]
+        assert req.order_class == OrderClass.BRACKET
+        assert req.stop_loss is not None
+        assert req.take_profit is not None
+
 
 # ---------------------------------------------------------------------------
 # PositionTracker tests

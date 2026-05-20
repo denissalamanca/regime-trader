@@ -394,12 +394,17 @@ class OrderExecutor:
         signal,
         trade_id: Optional[str] = None,
     ) -> OrderResult:
-        """Submit a bracket order: entry + stop loss + take profit via Alpaca OCO.
+        """Submit an entry that ALWAYS carries a protective stop at the broker.
+
+        With a take-profit this is a full Alpaca BRACKET (entry + stop + target).
+        Without one it is an OTO ("one-triggers-other") so the entry still brings
+        a resting stop-loss. A bare entry with no broker-side stop is never used
+        for live trading — closing that gap is the point of this method (A1).
 
         Parameters
         ----------
         signal : Signal
-            Must have entry_price, stop_loss, and optionally take_profit.
+            Must have entry_price and stop_loss; take_profit is optional.
         trade_id : str, optional
 
         Returns
@@ -424,7 +429,11 @@ class OrderExecutor:
 
         stop_price = round(signal.stop_loss, 2)
 
-        # Build bracket
+        # BRACKET when a target exists, otherwise OTO (entry-triggers-stop) so a
+        # protective stop always rests at the broker even with no take-profit.
+        has_target = signal.take_profit is not None
+        order_class = OrderClass.BRACKET if has_target else OrderClass.OTO
+
         kwargs = {
             "symbol": signal.symbol,
             "qty": qty,
@@ -432,15 +441,16 @@ class OrderExecutor:
             "type": "limit",
             "time_in_force": TimeInForce.DAY,
             "limit_price": limit_price,
-            "order_class": OrderClass.BRACKET,
+            "order_class": order_class,
             "stop_loss": StopLossRequest(stop_price=stop_price),
         }
-        if signal.take_profit is not None:
+        if has_target:
             kwargs["take_profit"] = TakeProfitRequest(
                 limit_price=round(signal.take_profit, 2))
 
         self._log_event("submit_bracket", tid, signal.symbol,
                         side.value, qty,
+                        order_class=order_class.value,
                         limit_price=limit_price,
                         stop_price=stop_price,
                         take_profit=signal.take_profit)
@@ -459,7 +469,7 @@ class OrderExecutor:
                 symbol=signal.symbol,
                 side=side.value,
                 qty=qty,
-                order_type="bracket",
+                order_type="bracket" if has_target else "oto",
                 status=_map_status(status_str),
                 limit_price=limit_price,
                 stop_price=stop_price,
