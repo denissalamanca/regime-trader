@@ -288,6 +288,9 @@ class TradingLoop:
         self._regime_change_count = 0
         self._last_regime_label: Optional[str] = None
         self._bar_count = 0
+        # Trading-day tracker for daily/weekly risk-window resets (A3); None
+        # until the first tick observes a date.
+        self._last_trading_date: Optional[pd.Timestamp] = None
 
     def run(self) -> None:
         """Run the trading loop until interrupted."""
@@ -312,6 +315,33 @@ class TradingLoop:
         """Signal the loop to stop."""
         self._running = False
 
+    def _maybe_reset_periods(self, today: pd.Timestamp, equity: float) -> None:
+        """Reset daily/weekly risk windows when the calendar rolls over (A3).
+
+        The circuit breaker measures daily/weekly drawdown from the day/week
+        start equity, and the risk manager caps trades per day — both drift if
+        never reset (e.g. "daily" DD measured from process start, daily trade
+        count never clearing). Called once per tick; a no-op until the date
+        actually advances. ``today`` is a normalized (midnight) trading date.
+        """
+        if self._last_trading_date is None:
+            self._last_trading_date = today
+            return
+        if today <= self._last_trading_date:
+            return
+        prev = self._last_trading_date
+        self._last_trading_date = today
+        # New ISO week → weekly reset (which also re-bases the daily window);
+        # otherwise a new day → daily reset.
+        if today.isocalendar().week != prev.isocalendar().week or (today - prev).days >= 7:
+            logger.info("New trading week (%s -> %s): resetting weekly risk window.",
+                        prev.date(), today.date())
+            self._risk.reset_weekly(equity)
+        else:
+            logger.info("New trading day (%s -> %s): resetting daily risk window.",
+                        prev.date(), today.date())
+            self._risk.reset_daily(equity)
+
     def _tick(self) -> None:
         """Execute one iteration of the trading loop."""
         self._bar_count += 1
@@ -335,6 +365,10 @@ class TradingLoop:
             return
 
         self._risk.update_equity_tracking(equity)
+
+        # Roll over daily/weekly risk windows when the calendar advances (A3).
+        today_et = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
+        self._maybe_reset_periods(today_et, equity)
 
         # Sync positions
         try:

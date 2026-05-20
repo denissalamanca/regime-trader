@@ -56,7 +56,7 @@ class TestLowVolBullStrategy:
         assert sig is not None
         assert sig.direction == SignalDirection.LONG
         assert sig.position_size_pct == 0.95
-        assert sig.leverage == 1.25
+        assert sig.leverage == 1.0  # A4: was 1.25 (silently clamped); now unleveraged
 
     def test_has_stop_below_entry(self):
         strat = LowVolBullStrategy({}, _info("BULL", vol=0.10))

@@ -192,8 +192,15 @@ class BaseStrategy(ABC):
 class LowVolBullStrategy(BaseStrategy):
     """Low-volatility regime → go long with large allocation.
 
-    Calm markets trend upward. Be fully invested with 1.25x leverage
-    and a trailing stop based on the 50 EMA as floor.
+    Calm markets trend upward. Be fully invested (95%), unleveraged, with a
+    stop based on the 50 EMA as floor.
+
+    NOTE: leverage is intentionally 1.0x (A4). The previous 1.25x request was
+    effectively dead — the risk manager only permits >1.0x leverage in the
+    NEUTRAL/STRONG_BULL regimes, which this low-vol archetype rarely maps to,
+    so it was silently clamped. Leveraging the calmest regimes also runs
+    counter to the system's drawdown-first philosophy. To run leveraged, raise
+    ``risk.max_leverage`` in config deliberately rather than here.
     """
     strategy_name = "low_vol_bull"
 
@@ -210,10 +217,10 @@ class LowVolBullStrategy(BaseStrategy):
 
         return self._make_signal(
             symbol, SignalDirection.LONG, price, stop, regime_state,
-            f"Low-vol regime ({regime_state.label}): 1.25x leveraged long, "
+            f"Low-vol regime ({regime_state.label}): 95% long (1.0x), "
             f"stop at max(3ATR, 50EMA)={stop:.2f}",
             position_size_pct=0.95,
-            leverage=1.25,
+            leverage=1.0,
         )
 
 
